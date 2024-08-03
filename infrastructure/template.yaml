@@ -1,0 +1,263 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Smart Home Energy Management System
+
+Resources:
+  # Device Service
+  DeviceService:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      CodeUri: ./device-service/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DevicesTable
+      Environment:
+        Variables:
+          DEVICES_TABLE: !Ref DevicesTable
+      Events:
+        GetDevices:
+          Type: Api
+          Properties:
+            Path: /devices
+            Method: get
+        AddDevice:
+          Type: Api
+          Properties:
+            Path: /devices
+            Method: post
+        GetDevice:
+          Type: Api
+          Properties:
+            Path: /devices/{device_id}
+            Method: get
+        ProviderStates:
+          Type: Api
+          Properties:
+            Path: /_pact/provider_states
+            Method: post
+
+  # Energy Service
+  EnergyService:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      CodeUri: ./energy-service/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EnergyConsumptionTable
+      Environment:
+        Variables:
+          ENERGY_TABLE: !Ref EnergyConsumptionTable
+          DEVICE_SERVICE_URL: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+      Events:
+        RecordConsumption:
+          Type: Api
+          Properties:
+            Path: /energy/consumption
+            Method: post
+        GetAnalytics:
+          Type: Api
+          Properties:
+            Path: /energy/analytics
+            Method: get
+
+  # User Service
+  UserService:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      CodeUri: ./user-service/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+      Environment:
+        Variables:
+          USERS_TABLE: !Ref UsersTable
+          DEVICE_SERVICE_URL: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+      Events:
+        CreateUser:
+          Type: Api
+          Properties:
+            Path: /users
+            Method: post
+        GetUser:
+          Type: Api
+          Properties:
+            Path: /users/{user_id}
+            Method: get
+        AddDeviceToUser:
+          Type: Api
+          Properties:
+            Path: /users/{user_id}/devices
+            Method: post
+
+  # DynamoDB Tables
+  DevicesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Devices
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  EnergyConsumptionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: EnergyConsumption
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Users
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  # S3 Bucket for Pact Files
+  PactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-pact-files"
+      VersioningConfiguration:
+        Status: Enabled
+
+  # IAM Role for CodeBuild
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource: 
+                  - !GetAtt PactBucket.Arn
+                  - !Sub "${PactBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # CodeBuild Projects
+  DeviceServiceBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-device-service-build"
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      Source:
+        Type: GITHUB
+        Location: https://github.com/silviuh/smart-home-energy.git
+        BuildSpec: device-service/buildspec.yml
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PUSH
+            - Type: FILE_PATH
+              Pattern: device-service/*
+
+  EnergyServiceBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-energy-service-build"
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      Source:
+        Type: GITHUB
+        Location: https://github.com/silviuh/smart-home-energy.git
+        BuildSpec: energy-service/buildspec.yml
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PUSH
+            - Type: FILE_PATH
+              Pattern: energy-service/*
+
+  UserServiceBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-user-service-build"
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      Source:
+        Type: GITHUB
+        Location: https://github.com/silviuh/smart-home-energy.git
+        BuildSpec: user-service/buildspec.yml
+      Triggers:
+        Webhook: true
+        FilterGroups:
+          - - Type: EVENT
+              Pattern: PUSH
+            - Type: FILE_PATH
+              Pattern: user-service/*
+
+Outputs:
+  ApiUrl:
+    Description: URL of the API Gateway endpoint
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+
+  PactBucketName:
+    Description: Name of the S3 bucket for Pact files
+    Value: !Ref PactBucket
+
+  DeviceServiceFunction:
+    Description: Device Service Lambda Function ARN
+    Value: !GetAtt DeviceService.Arn
+
+  EnergyServiceFunction:
+    Description: Energy Service Lambda Function ARN
+    Value: !GetAtt EnergyService.Arn
+
+  UserServiceFunction:
+    Description: User Service Lambda Function ARN
+    Value: !GetAtt UserService.Arn
