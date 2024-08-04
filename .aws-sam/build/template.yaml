@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Smart Home Energy Management System
+Resources:
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: SmartHomeEnergyApi
+  DeviceService:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      CodeUri: DeviceService
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: DevicesTable
+      Environment:
+        Variables:
+          DEVICES_TABLE:
+            Ref: DevicesTable
+    Metadata:
+      SamResourceId: DeviceService
+  DevicesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: ApiGateway
+      ParentId:
+        Fn::GetAtt:
+        - ApiGateway
+        - RootResourceId
+      PathPart: devices
+  GetDevicesMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: ApiGateway
+      ResourceId:
+        Ref: DevicesResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeviceService.Arn}/invocations
+  EnergyService:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      CodeUri: EnergyService
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: EnergyConsumptionTable
+      Environment:
+        Variables:
+          ENERGY_TABLE:
+            Ref: EnergyConsumptionTable
+          DEVICE_SERVICE_URL:
+            Fn::Sub: https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod
+    Metadata:
+      SamResourceId: EnergyService
+  EnergyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: ApiGateway
+      ParentId:
+        Fn::GetAtt:
+        - ApiGateway
+        - RootResourceId
+      PathPart: energy
+  ConsumptionResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: ApiGateway
+      ParentId:
+        Ref: EnergyResource
+      PathPart: consumption
+  RecordConsumptionMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: ApiGateway
+      ResourceId:
+        Ref: ConsumptionResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${EnergyService.Arn}/invocations
+  UserService:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      CodeUri: UserService
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: UsersTable
+      Environment:
+        Variables:
+          USERS_TABLE:
+            Ref: UsersTable
+          DEVICE_SERVICE_URL:
+            Fn::Sub: https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod
+    Metadata:
+      SamResourceId: UserService
+  UsersResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: ApiGateway
+      ParentId:
+        Fn::GetAtt:
+        - ApiGateway
+        - RootResourceId
+      PathPart: users
+  CreateUserMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: ApiGateway
+      ResourceId:
+        Ref: UsersResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UserService.Arn}/invocations
+  DevicesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Devices
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+  EnergyConsumptionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: EnergyConsumption
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Users
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+  PactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::Sub: ${AWS::StackName}-pact-files
+      VersioningConfiguration:
+        Status: Enabled
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+    - GetDevicesMethod
+    - RecordConsumptionMethod
+    - CreateUserMethod
+    Properties:
+      RestApiId:
+        Ref: ApiGateway
+      StageName: Prod
+Outputs:
+  ApiUrl:
+    Description: URL of the API Gateway endpoint
+    Value:
+      Fn::Sub: https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/
+  PactBucketName:
+    Description: Name of the S3 bucket for Pact files
+    Value:
+      Ref: PactBucket
+  DeviceServiceFunction:
+    Description: Device Service Lambda Function ARN
+    Value:
+      Fn::GetAtt:
+      - DeviceService
+      - Arn
+  EnergyServiceFunction:
+    Description: Energy Service Lambda Function ARN
+    Value:
+      Fn::GetAtt:
+      - EnergyService
+      - Arn
+  UserServiceFunction:
+    Description: User Service Lambda Function ARN
+    Value:
+      Fn::GetAtt:
+      - UserService
+      - Arn

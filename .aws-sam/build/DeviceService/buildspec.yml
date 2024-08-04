@@ -1,0 +1,32 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.9
+    commands:
+      - pip install -r requirements.txt
+      - pip install pytest pact-python moto boto3
+
+  pre_build:
+    commands:
+      - echo "Running tests"
+      - pytest tests/
+
+  build:
+    commands:
+      - echo "Running Pact verification"
+      - pytest tests/pact_verification.py
+      - echo "Preparing deployment package"
+      - zip -r deployment-package.zip .
+      - echo "Deploying Lambda function"
+      - aws lambda update-function-code --function-name $LAMBDA_FUNCTION_NAME --zip-file fileb://deployment-package.zip
+
+  post_build:
+    commands:
+      - echo "Uploading Pact files to S3"
+      - aws s3 cp pacts/ s3://${PACT_BUCKET_NAME}/${SERVICE_NAME}/ --recursive
+
+artifacts:
+  files:
+    - deployment-package.zip

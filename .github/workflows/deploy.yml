@@ -1,0 +1,53 @@
+name: Deploy Lambda Functions
+
+on:
+  push:
+    branches: [ master ]  # Adjust this to your main branch name
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [user-service, device-service, energy-service]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.9'
+
+    - name: Install dependencies
+      run: |
+        cd ${{ matrix.service }}
+        pip install -r requirements.txt
+
+    - name: Run tests
+      run: |
+        cd ${{ matrix.service }}
+        pip install pytest
+        pytest tests/
+
+    - name: Deploy to AWS Lambda
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_DEFAULT_REGION: 'us-west-2'  # Change this to your AWS region
+      run: |
+        cd ${{ matrix.service }}
+        pip install awscli
+        zip -r deployment-package.zip .
+        aws lambda update-function-code --function-name smart-home-energy-${{ matrix.service }} --zip-file fileb://deployment-package.zip
+
+    - name: Upload Pact files
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_DEFAULT_REGION: 'us-west-2'  # Change this to your AWS region
+      run: |
+        cd ${{ matrix.service }}
+        aws s3 cp pacts/ s3://smart-home-energy-pact-files/${{ matrix.service }}/ --recursive
