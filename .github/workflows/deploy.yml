@@ -26,11 +26,12 @@ jobs:
         cd ${{ matrix.service }}
         pip install -r requirements.txt
 
-    - name: Run tests
+    - name: Run Pact tests
       run: |
         cd ${{ matrix.service }}
-        pip install pytest
-        pytest tests/
+        pip install -r requirements.txt
+        pip install pytest pact-python
+        pytest pact_tests.py
 
     - name: Deploy to AWS Lambda
       env:
