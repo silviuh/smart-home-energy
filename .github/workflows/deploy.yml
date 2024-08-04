@@ -29,8 +29,6 @@ jobs:
     - name: Run Pact tests
       run: |
         cd ${{ matrix.service }}/tests
-        pip install -r requirements.txt
-        pip install pytest pact-python
         pytest pact_tests.py
 
     - name: Deploy to AWS Lambda
