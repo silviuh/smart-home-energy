@@ -1,9 +1,0 @@
-/opt/hostedtoolcache/Ruby/2.2.10/x64/bin/ruby -r ./siteconf20211008-1721-12muws4.rb extconf.rb
-creating Makefile
-
-make "DESTDIR=" clean
-
-make "DESTDIR="
-make: Nothing to be done for 'all'.
-
-make "DESTDIR=" install

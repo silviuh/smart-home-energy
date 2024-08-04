@@ -1,4 +1,0 @@
-boto3==1.18.0
-pact-python==1.5.0
-pytest==6.2.5
-moto==2.2.0

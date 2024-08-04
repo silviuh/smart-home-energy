@@ -39,7 +39,7 @@ jobs:
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         AWS_DEFAULT_REGION: 'us-west-2'  # Change this to your AWS region
       run: |
-        aws lambda list-functions --region ${{ secrets.AWS_REGION }}
+        aws lambda list-functions --region ${{ env.AWS_REGION }}
         cd ${{ matrix.service }}
         pip install awscli
         zip -r deployment-package.zip .
